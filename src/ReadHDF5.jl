@@ -32,14 +32,18 @@ function get(fname)
 end
 function _help_read(item,get)
     for k in keys(item)
-        if k isa HDF5.Group
+        if item[k] isa HDF5.Group
             get[k]=Dict()
+            _help_read(item[k],get[k])
         else
-            d = attrs(item[k])              
+            
+            d = attrs(item[k])   
+            println(d)            
             meta = NamedTuple{Tuple(Symbol.(keys(d)))}(values(d))
             get[k] = attach_metadata(read(item[k]),meta)
             get[k] = read(item[k])
-        end
+        
+        end    
     end
 end
 

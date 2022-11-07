@@ -1,8 +1,47 @@
 module ReadHDF5
 
 import HDF5
-export read_HDF5, read_HDF5_short
+export read_HDF5, get, read_HDF5_short
 
+
+
+
+
+function get(fname)
+    f = HDF5.h5open(fname,"r")
+
+    get = Dict()
+    r = r"increment_([0-9]+)"
+    for k in keys(f)
+        if occursin(r,k)
+            get[k] = Dict()
+            
+            #Metadata of increments needed? Doesnt work:
+            #d = attrs(f[k])
+            #meta = NamedTuple{Tuple(Symbol.(keys(d)))}(values(d))
+            #get[k]= attach_metadata(get[k],meta)
+            #println(typeof(f[k]))
+            
+            _help_read(f[k], get[k])
+            
+        end
+    end
+    
+    close(f)
+    return get
+end
+function _help_read(item,get)
+    for k in keys(item)
+        if k isa HDF5.Group
+            get[k]=Dict()
+        else
+            d = attrs(item[k])              
+            meta = NamedTuple{Tuple(Symbol.(keys(d)))}(values(d))
+            get[k] = attach_metadata(read(item[k]),meta)
+            get[k] = read(item[k])
+        end
+    end
+end
 
 const prefix_inc = "increment_"
 
@@ -121,6 +160,8 @@ function read_HDF5(filename::AbstractString)
     ,fname
     ,_protected)
 end
+
+
 
 
 

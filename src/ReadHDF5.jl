@@ -1,7 +1,7 @@
 module ReadHDF5
 
-using HDF5, Metadata, NaturalSort
-export read_HDF5, get, view
+using HDF5, Metadata, NaturalSort, WriteVTK
+export read_HDF5, get, view, place, export_VTK
 
 
 const prefix_inc = "increment_"
@@ -44,7 +44,7 @@ function view(
     dup = deepcopy(obj)
     for (type,input) in zip(["increments","times","phases","homogenizations","fields"],[increments,times,phases,homogenization,fields])
         if input !== nothing
-           _manage_choice(dup,input,type,"set")  
+           _manage_choice(dup,input,type,action)  
         end
     end
     if protected !== nothing
@@ -110,11 +110,12 @@ function _manage_choice(obj, input::Vector{<:AbstractFloat},type::String,action:
     end
     _set_viewchoice(obj,choice,"increments",action)
 end
+
 function _set_viewchoice(obj::HDF5_Obj, choice::Vector{String}, type::String, action::String)
     existing = Set(obj.visible[type])
     valid=intersect(Set(choice), Set(getproperty(obj,Symbol(type))))
     if action =="set"
-        obj.visible[type]=sort!([s for s in valid],lt=natural)      #maybe bad: from vector to set to vector
+        obj.visible[type]=sort!([s for s in valid],lt=natural)#maybe bad: from vector to set to vector
     elseif action=="add"
         add=union(existing,valid)
         obj.visible[type]=sort!([s for s in valid],lt=natural)
@@ -158,10 +159,213 @@ function get(obj::HDF5_Obj, output::Union{String, Vector{String}}="*")
     return dict
 end
 
-function _read(dataset)
+function _read(dataset::HDF5.Dataset)
     d = attrs(dataset)              
     meta = NamedTuple{Tuple(Symbol.(keys(d)))}(values(d))
     return attach_metadata(read(dataset),meta)
+end
+
+function place(
+    obj::HDF5_Obj, 
+    output::Union{String, Vector{String}}="*";
+    constituents::Union{Vector{Int64},Nothing}=nothing,
+    fill_float::Float64=NaN,
+    fill_int::Int64=0
+)
+    
+    all = output=="*" ? true : false 
+    output = output isa String ? [output] : output
+    
+    dict::Dict{String,Dict}=Dict()
+    
+    constituents_=  constituents===nothing ? range(1,obj.N_constituents) : constituents #maybe redo
+    println("constituents: ",constituents_)
+
+    suffixes= obj.N_constituents==1 || length(constituents_) < 2 ? [""] : ["#"*string(c) for c in constituents_]
+
+    (at_cell_ph,in_data_ph,at_cell_ho,in_data_ho)= _mappings(obj)
+
+    file = HDF5.h5open(obj.fname,"r")
+    for inc in obj.visible["increments"]
+        dict[inc]=Dict([("phase",Dict()),("homogenization",Dict()),("geometry",Dict())])
+        for out in keys(file[inc*"/geometry"])
+            if all || out in output
+                dict[inc]["geometry"][out]= _read(file[inc*"/geometry/"*out])
+            end 
+        end
+        for ty in ["phase","homogenization"]
+            for label in obj.visible[ty*"s"]
+                for field in keys(file[inc*"/"*ty*"/"*label])
+                    if field in obj.visible["fields"]
+                        if !(field in keys(dict[inc][ty]))
+                            dict[inc][ty][field]=Dict()
+                        end
+                        for out in keys(file[inc*"/"*ty*"/"*label*"/"*field])
+                            if all || out in output
+                                data= _read(file[inc*"/"*ty*"/"*label*"/"*field*"/"*out])
+                                if ty=="phase"
+                                    if !(out*suffixes[1] in keys(dict[inc][ty][field]))
+                                        for suffix in suffixes
+                                            dict[inc][ty][field][out*suffix] = _empty_like(obj,data,fill_float,fill_int)
+                                        end
+                                    end
+                                    for (c,suffix) in zip(constituents_,suffixes)
+                                            dict[inc][ty][field][out*suffix][:,:,at_cell_ph[c][label]]=data[:,:,in_data_ph[c][label]]
+                                    end
+                                end
+                                if ty == "homogenization"
+                                    if !(out in keys(dict[inc][ty][field]))
+                                        dict[inc][ty][field][out]= _empty_like(obj,data,fill_float,fill_int)
+                                        println( "sizee:",size(dict[inc][ty][field][out]))
+                                    end
+                                    dict[inc][ty][field][out][:,at_cell_ho[label]] = data[:,in_data_ho[label]]
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return dict
+end
+
+function export_VTK(obj::HDF5_Obj,
+                    output::Union{String,Vector{String}}="*",
+                    mode::String="cell",
+                    constituents::Union{Vector{Int64},Nothing}=nothing,
+                    fill_float::Float64=NaN,
+                    fill_int::Int64=0,
+                    parallel::Bool=true)
+
+    if lowercase(mode) == "cell"
+        mode="cell"
+    elseif lowercase(mode) == "point"
+        mode ="point"
+    else
+        error("invalid mode: "*mode)
+    end
+
+    all = output=="*" ? true : false 
+    output = output isa String ? [output] : output
+
+    constituents_=  constituents===nothing ? range(1,obj.N_constituents) : constituents 
+    suffixes= obj.N_constituents==1 || length(constituents_) < 2 ? [""] : ["#"*string(c) for c in constituents_]
+
+    (at_cell_ph,in_data_ph,at_cell_ho,in_data_ho)= _mappings(obj)
+
+    file = HDF5.h5open(obj.fname,"r")
+    
+    cells = read_attribute(file["geometry"],"cells")
+    println("cells: ",cells)
+    origin = read_attribute(file["geometry"],"origin")
+
+    size = read_attribute(file["geometry"],"size")
+
+    x = origin[1]:size[1]-origin[1]:cells[1]
+    println(x)
+    y = origin[2]:size[2]-origin[2]:cells[2]
+    println(y)
+    z = origin[3]:size[3]-origin[3]:cells[3]
+    println(z)
+ 
+    for inc in obj.visible["increments"]
+        vtkfile=vtk_grid(_trunc_name(obj.file)*"_"*inc, x, y, z) #TODO different for mode "point" ?
+        vtkfile["created",VTKFieldData()]=read_attribute(file,"creator")*" ("*read_attribute(file,"created")*")"
+        if mode=="cell"
+            vtkfile["u"]=_read(file[inc*"/geometry/u_n"])
+        else
+            vtkfile["u"]=_read(file[inc*"/geometry/u_p"])
+        end
+        for ty in ["phase","homogenization"]
+            for field in obj.visible["fields"]
+                outs=Dict()
+                for label in obj.visible[ty*"s"]
+                    if field in keys(file[inc*"/"*ty*"/"*label])
+                        for out in keys(file[inc*"/"*ty*"/"*label*"/"*field])
+                            if all || out in output
+                                data=_read(file[inc*"/"*ty*"/"*label*"/"*field*"/"*out])
+                                if ty=="phase"
+                                    if !(out*suffixes[1] in keys(outs))
+                                        for suffix in suffixes
+                                            outs[out*suffix] = _empty_like(obj,data,fill_float,fill_int)
+                                        end
+                                    end
+                                    for (c,suffix) in zip(constituents_,suffixes)
+                                        outs[out*suffix][:,:,at_cell_ph[c][label]]=data[:,:,in_data_ph[c][label]]
+                                    end
+                                end
+                                if ty == "homogenization"
+                                    if !(out in keys(outs))
+                                        outs[out]= _empty_like(obj,data,fill_float,fill_int)
+                                    end
+                                    outs[out][:,at_cell_ho[label]] = data[:,in_data_ho[label]]
+                                end
+                            end
+                        end
+                    end
+                end
+                for (label,dataset) in outs
+                    vtkfile["/"*ty*"/"*field*"/"*label]=dataset
+                end
+            end
+        end
+        vtk_save(vtkfile)
+    end
+end
+
+
+function _empty_like(obj::HDF5_Obj, dataset,fill_float::Float64, fill_int::Int64)
+    if parent(dataset) isa Array{<:Integer}
+        fill_val=fill_int
+    elseif parent(dataset) isa Array{<:AbstractFloat}
+        fill_val=fill_float
+    else
+        error("Wrong datatype")
+    end
+    shape=(size(dataset)[1:end-1]...,obj.N_materialpoints)
+    return fill(fill_val,shape)
+end
+
+
+function _mappings(obj::HDF5_Obj)
+    file = HDF5.h5open(obj.fname,"r")
+    
+    at_cell_ph=[Dict{String,Vector{Int64}}() for _ in 1:obj.N_constituents]
+    in_data_ph=[Dict{String,Vector{Int64}}() for _ in 1:obj.N_constituents]
+    at_cell_ho=Dict{String,Vector{Int64}}()
+    in_data_ho=Dict{String,Vector{Int64}}()
+
+    phase=[file["cell_to/phase"][i,j][:label] for i=1:obj.N_constituents, j=1:obj.N_materialpoints]
+    homogenization_dset = file["cell_to/homogenization"]
+    homogenization = [homogenization_dset[i][:label] for i in 1:size(homogenization_dset)[1]]
+
+    #from file["cell_to/phase] read columnwise the indices where the different Phases are in at_cell_ph and their indices in in_data_ph
+    for c in range(1,obj.N_constituents)
+        for label in obj.visible["phases"]
+            at_cell_ph[c][label] = findall(x->x==label, phase[c,:])
+            in_data_ph[c][label] = Int64[]
+            for i in at_cell_ph[c][label]
+                push!(in_data_ph[c][label], file["cell_to/phase"][c,i][:entry]+1)
+            end
+        end
+    end
+    for label in obj.visible["homogenizations"]
+        at_cell_ho[label] = findall(x->x==label, homogenization)
+        in_data_ho[label] = Int64[]
+        for i in at_cell_ho[label]
+            push!(in_data_ho[label] ,file["cell_to/homogenization"][i][:entry]+1)
+        end
+    end
+    
+    return (at_cell_ph,in_data_ph,at_cell_ho,in_data_ho)
+end
+
+function _trunc_name(filename::String)
+    arr=split(filename,"\\")
+    trunc=split(arr[end],".")
+    print("trunc: ",trunc[1])
+    return trunc[1]
 end
 
 
@@ -197,7 +401,7 @@ function read_HDF5(filename::String)
 
     #read increments
     increments=[i for i in keys(file) if occursin(Regex("$prefix_inc([0-9]+)"),i)] #alternativ: increments=collect(i for i in keys(file) if occursin(Regex("$prefix([0-9]+)"),i))
-    increments=sort!(increments, lt=natural)# sorting algo? not sorted by increment number now
+    increments=sort!(increments, lt=natural)
 
     if length(increments) == 0
         error("no increments found")
@@ -210,13 +414,11 @@ function read_HDF5(filename::String)
 
     homogenization_dset = file["cell_to/homogenization"] #TODO astype("str") ?
     homogenization = [homogenization_dset[i][:label] for i in 1:size(homogenization_dset)[1]] #size= (4096,) maybe same as N_materialpoints? #always 1D?
-    homogenizations=unique!(sort!(homogenization))# sorting_algo?  first sort, then unique because https://discourse.julialang.org/t/how-can-write-a-function-to-find-unique-elements-in-array-without-any-allocation/34005/4
+    homogenizations=unique!(sort!(homogenization,lt=natural))# sorting_algo needed?  first sort, then unique because https://discourse.julialang.org/t/how-can-write-a-function-to-find-unique-elements-in-array-without-any-allocation/34005/4
 
     phase_dset=file["cell_to/phase"] #size= (1, 4096) because can be 2D if more than one phase?
     
-    phase=[phase_dset[i,j][:label] for i=1:N_constituents, j=1:N_materialpoints]
-    println(size(phase))
-    
+    phase=[phase_dset[i,j][:label] for i=1:N_constituents, j=1:N_materialpoints] #maybe phase also as membervariable in HDF_obj? needed for mapping
     phases=unique!(sort!(vec(phase))) #sorting algo? vec() for 1D-Array
     
     fields=String[]

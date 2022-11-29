@@ -162,15 +162,16 @@ end
 function _read(dataset::HDF5.Dataset)
     d = attrs(dataset)              
     meta = NamedTuple{Tuple(Symbol.(keys(d)))}(values(d))
-    return attach_metadata(read(dataset),meta)
+    arr::Array{Float32}=read(dataset)
+    return attach_metadata(arr,meta)
 end
 
 function place(
     obj::HDF5_Obj, 
     output::Union{String, Vector{String}}="*";
     constituents::Union{Vector{Int64},Nothing}=nothing,
-    fill_float::Float64=NaN,
-    fill_int::Int64=0
+    fill_float::Float32=Float32(NaN),
+    fill_int::Int32=Int32(0)
 )
     
     all = output=="*" ? true : false 
@@ -179,7 +180,6 @@ function place(
     dict::Dict{String,Dict}=Dict()
     
     constituents_=  constituents===nothing ? range(1,obj.N_constituents) : constituents #maybe redo
-    println("constituents: ",constituents_)
 
     suffixes= obj.N_constituents==1 || length(constituents_) < 2 ? [""] : ["#"*string(c) for c in constituents_]
 
@@ -210,15 +210,22 @@ function place(
                                         end
                                     end
                                     for (c,suffix) in zip(constituents_,suffixes)
+                                        if ndims(data)==3
                                             dict[inc][ty][field][out*suffix][:,:,at_cell_ph[c][label]]=data[:,:,in_data_ph[c][label]]
+                                        elseif ndims(data)==2
+                                            dict[inc][ty][field][out*suffix][:,at_cell_ph[c][label]]=data[:,in_data_ph[c][label]]
+                                        end
                                     end
                                 end
                                 if ty == "homogenization"
                                     if !(out in keys(dict[inc][ty][field]))
                                         dict[inc][ty][field][out]= _empty_like(obj,data,fill_float,fill_int)
-                                        println( "sizee:",size(dict[inc][ty][field][out]))
                                     end
-                                    dict[inc][ty][field][out][:,at_cell_ho[label]] = data[:,in_data_ho[label]]
+                                    if ndims(data)==2
+                                        dict[inc][ty][field][out][:,at_cell_ho[label]] = data[:,in_data_ho[label]]
+                                    elseif ndims(data)==1
+                                        dict[inc][ty][field][out][at_cell_ho[label]] = data[in_data_ho[label]]
+                                    end
                                 end
                             end
                         end
@@ -234,9 +241,10 @@ function export_VTK(obj::HDF5_Obj,
                     output::Union{String,Vector{String}}="*",
                     mode::String="cell",
                     constituents::Union{Vector{Int64},Nothing}=nothing,
-                    fill_float::Float64=NaN,
-                    fill_int::Int64=0,
-                    parallel::Bool=true)
+                    fill_float::Float32=Float32(NaN),
+                    fill_int::Int32=Int32(0),
+                    parallel::Bool=true #does nothing now
+                    )
 
     if lowercase(mode) == "cell"
         mode="cell"
@@ -257,21 +265,17 @@ function export_VTK(obj::HDF5_Obj,
     file = HDF5.h5open(obj.fname,"r")
     
     cells = read_attribute(file["geometry"],"cells")
-    println("cells: ",cells)
     origin = read_attribute(file["geometry"],"origin")
-
     size = read_attribute(file["geometry"],"size")
 
-    x = origin[1]:size[1]-origin[1]:cells[1]
-    println(x)
-    y = origin[2]:size[2]-origin[2]:cells[2]
-    println(y)
-    z = origin[3]:size[3]-origin[3]:cells[3]
-    println(z)
+    x = (origin[1]:size[1]-origin[1]:cells[1]) / cells[1]
+    y = (origin[2]:size[2]-origin[2]:cells[2]) / cells[2]
+    z = (origin[3]:size[3]-origin[3]:cells[3]) / cells[3]
+
  
     for inc in obj.visible["increments"]
         vtkfile=vtk_grid(_trunc_name(obj.file)*"_"*inc, x, y, z) #TODO different for mode "point" ?
-        vtkfile["created",VTKFieldData()]=read_attribute(file,"creator")*" ("*read_attribute(file,"created")*")"
+        vtkfile["created",VTKFieldData()]=read_attribute(file,"creator") *" ("* read_attribute(file,"created") *")"
         if mode=="cell"
             vtkfile["u"]=_read(file[inc*"/geometry/u_n"])
         else
@@ -292,21 +296,33 @@ function export_VTK(obj::HDF5_Obj,
                                         end
                                     end
                                     for (c,suffix) in zip(constituents_,suffixes)
-                                        outs[out*suffix][:,:,at_cell_ph[c][label]]=data[:,:,in_data_ph[c][label]]
+                                        if ndims(data)==3
+                                            outs[out*suffix][:,:,at_cell_ph[c][label]]=data[:,:,in_data_ph[c][label]]
+                                        elseif ndims(data)==2
+                                            outs[out*suffix][:,at_cell_ph[c][label]]=data[:,in_data_ph[c][label]]
+                                        else
+                                            error("Dimension of Phase-Data not 2 or 3")
+                                        end
                                     end
                                 end
                                 if ty == "homogenization"
                                     if !(out in keys(outs))
                                         outs[out]= _empty_like(obj,data,fill_float,fill_int)
                                     end
-                                    outs[out][:,at_cell_ho[label]] = data[:,in_data_ho[label]]
+                                    if ndims(data)==2
+                                        outs[out][:,at_cell_ho[label]] = data[:,in_data_ho[label]]
+                                    elseif ndims(data)==1
+                                        outs[out][at_cell_ho[label]] = data[in_data_ho[label]]
+                                    else
+                                        error("Dimension of homogenization-Data not 1 or 2")
+                                    end
                                 end
                             end
                         end
                     end
                 end
                 for (label,dataset) in outs
-                    vtkfile["/"*ty*"/"*field*"/"*label]=dataset
+                    vtkfile["/"*ty*"/"*field*"/"*label*" / "*dataset.unit]=dataset
                 end
             end
         end
@@ -315,7 +331,7 @@ function export_VTK(obj::HDF5_Obj,
 end
 
 
-function _empty_like(obj::HDF5_Obj, dataset,fill_float::Float64, fill_int::Int64)
+function _empty_like(obj::HDF5_Obj, dataset,fill_float::Float32, fill_int::Int32)
     if parent(dataset) isa Array{<:Integer}
         fill_val=fill_int
     elseif parent(dataset) isa Array{<:AbstractFloat}
@@ -324,7 +340,7 @@ function _empty_like(obj::HDF5_Obj, dataset,fill_float::Float64, fill_int::Int64
         error("Wrong datatype")
     end
     shape=(size(dataset)[1:end-1]...,obj.N_materialpoints)
-    return fill(fill_val,shape)
+    return attach_metadata(fill(fill_val,shape),metadata(dataset))
 end
 
 
@@ -346,7 +362,7 @@ function _mappings(obj::HDF5_Obj)
             at_cell_ph[c][label] = findall(x->x==label, phase[c,:])
             in_data_ph[c][label] = Int64[]
             for i in at_cell_ph[c][label]
-                push!(in_data_ph[c][label], file["cell_to/phase"][c,i][:entry]+1)
+                push!(in_data_ph[c][label], file["cell_to/phase"][c,i][:entry]+1)#plus 1 because 1-based
             end
         end
     end
@@ -364,7 +380,6 @@ end
 function _trunc_name(filename::String)
     arr=split(filename,"\\")
     trunc=split(arr[end],".")
-    print("trunc: ",trunc[1])
     return trunc[1]
 end
 

@@ -1,12 +1,11 @@
 module damask
+import Base: view 
 
 using HDF5, Metadata, NaturalSort, WriteVTK
 export read_HDF5, get, view, place, export_VTK
 
 
 const prefix_inc = "increment_"
-
-
 
 struct HDF5_Obj
     file::String
@@ -22,9 +21,18 @@ struct HDF5_Obj
     homogenizations::Vector{String}
     phases::Vector{String}
     fields::Vector{String}
+    datasets::Dict{String,Dict{String,Vector{String}}}
     visible::Dict{String,Vector{String}} 
     fname::String
     _protected::Bool
+end
+
+Base.show(io::IO, obj::HDF5_Obj) = begin
+    str::String=string("Damask-Result-Object:\n  Filename: ",obj.file,"\n  Visible:  increments: ",obj.visible["increments"],"\n            phases:    ",obj.visible["phases"],"\n            homogenizations: ",obj.visible["homogenizations"],"\n            datasets: ")
+    for phase in obj.visible["phases"]
+        str=str*string(phase,": ",obj.datasets[phase],"\n                      ")
+    end
+    print(io,str,"\n")
 end
 
 
@@ -101,7 +109,6 @@ end
 #only type "times" possible
 function _manage_choice(obj, input::Vector{<:AbstractFloat},type::String,action::String)   
     choice=String[]
-    println(getproperty(obj,Symbol(type)))
     for (i,time) in enumerate(getproperty(obj,Symbol(type)))
         for j in input
             if isapprox(time,j) #set parameters of isapprox?
@@ -239,7 +246,7 @@ function place(
 end
 
 function export_VTK(obj::HDF5_Obj,
-                    output::Union{String,Vector{String}}="*",
+                    output::Union{String,Vector{String}}="*";
                     mode::String="cell",
                     constituents::Union{Vector{Int64},Nothing}=nothing,
                     fill_float::Float32=Float32(NaN),
@@ -304,8 +311,6 @@ function export_VTK(obj::HDF5_Obj,
                                             outs[out*suffix][:,:,at_cell_ph[c][label]]=data[:,:,in_data_ph[c][label]]
                                         elseif ndims(data)==2
                                             outs[out*suffix][:,at_cell_ph[c][label]]=data[:,in_data_ph[c][label]]
-                                        else
-                                            error("Dimension of Phase-Data not 2 or 3")
                                         end
                                     end
                                 end
@@ -317,8 +322,6 @@ function export_VTK(obj::HDF5_Obj,
                                         outs[out][:,at_cell_ho[label]] = data[:,in_data_ho[label]]
                                     elseif ndims(data)==1
                                         outs[out][at_cell_ho[label]] = data[in_data_ho[label]]
-                                    else
-                                        error("Dimension of homogenization-Data not 1 or 2")
                                     end
                                 end
                             end
@@ -414,8 +417,6 @@ function read_HDF5(filename::String)
         cells=HDF5.read_attribute(file["geometry"],"cells")
         _size=HDF5.read_attribute(file["geometry"],"size") #dont name variable size because conflict
         origin=HDF5.read_attribute(file["geometry"],"origin")
-    else
-        add_curl=add_divergence=add_gradient=nothing #? 
     end
 
     #read increments
@@ -441,10 +442,14 @@ function read_HDF5(filename::String)
     phases=unique!(sort!(vec(phase))) #sorting algo? vec() for 1D-Array
     
     fields=String[]
+    datasets=Dict()
     for c in phases
         val=keys(file[string("/",increments[1],"/phase/",c)]) 
+        datasets[c]=Dict()
         for v in val
             push!(fields,v)
+            dsets=keys(file[string("/",increments[1],"/phase/",c,"/",v)])
+            datasets[c][v]= keys(file["/"*increments[1]*"/phase/"*c*"/"*v]) 
         end
     end
     for m in homogenizations
@@ -454,7 +459,7 @@ function read_HDF5(filename::String)
         end
     end
     fields=unique!(sort!(fields))
-
+    
     visible =   Dict{String,Vector{String}}("increments"=>    increments,
                 "phases" =>         phases,
                 "homogenizations" => homogenizations,
@@ -480,6 +485,7 @@ function read_HDF5(filename::String)
     ,homogenizations
     ,phases
     ,fields
+    ,datasets
     ,visible
     ,fname
     ,_protected)

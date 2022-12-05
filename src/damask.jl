@@ -7,9 +7,6 @@ export read_HDF5, get, view, place, export_VTK
 const prefix_inc = "increment_"
 
 
-function testme()
-    return [2,3,4]
-end
 
 struct HDF5_Obj
     file::String
@@ -276,9 +273,12 @@ function export_VTK(obj::HDF5_Obj,
     y = (origin[2]:size[2]-origin[2]:cells[2]) / cells[2]
     z = (origin[3]:size[3]-origin[3]:cells[3]) / cells[3]
 
- 
+    n_digits=ndigits(parse(Int64,split(obj.increments[end],prefix_inc)[end]))
+
     for inc in obj.visible["increments"]
-        vtkfile=vtk_grid(_trunc_name(obj.file)*"_"*inc, x, y, z) #TODO different for mode "point" ?
+        k_inc=parse(Int64,split(inc,prefix_inc)[end])
+        vtkfile=vtk_grid(_trunc_name(obj.file)*"_increm"*string(k_inc,pad=n_digits), x, y, z) #TODO different for mode "point" ?
+
         vtkfile["created",VTKFieldData()]=read_attribute(file,"creator") *" ("* read_attribute(file,"created") *")"
         if mode=="cell"
             vtkfile["u"]=_read(file[inc*"/geometry/u_n"])

@@ -1,15 +1,16 @@
 module damask
-import Base: view, get
+import Base: view, get, getproperty
 
 using HDF5, Metadata, NaturalSort, WriteVTK
-export read_HDF5, get, view, place, export_VTK
+export read_HDF5, get, view, place, export_VTK,getproperty
 
 
 const prefix_inc = "increment_"
 
 struct HDF5_Obj
-    file::String
-    export_setup::Bool#?
+    filename::String
+    version_major::Int64
+    version_minor::Int64
     structured::Bool
     cells::Vector{Int64}
     size::Vector{Float64}
@@ -22,15 +23,13 @@ struct HDF5_Obj
     phases::Vector{String}
     fields::Vector{String}
     visible::Dict{String,Vector{String}}
-    fname::String
     _protected::Bool
 end
 
 Base.show(io::IO, obj::HDF5_Obj) = begin
-    str::String = string("Damask-Result-Object:\n  Filename: ", obj.file, "\n  Visible:  increments: ", obj.visible["increments"], "\n            phases:    ", obj.visible["phases"], "\n            homogenizations: ", obj.visible["homogenizations"], "\n")
+    str::String = string("Damask-Result-Object:\n  Filename: ", obj.filename, "\n  Visible:  increments:    ", obj.visible["increments"], "\n            phases:          ", obj.visible["phases"], "\n            homogenizations: ", obj.visible["homogenizations"], "\n            fields:          ",obj.visible["fields"],"\n")
     print(io, str, "\n")
 end
-
 
 function view(
     obj::HDF5_Obj;
@@ -83,7 +82,7 @@ function _manage_choice(obj::HDF5_Obj, input::String, type::String, action::Stri
         _set_viewchoice(obj, [input], type, action)
     end
 end
-function _manage_choice(obj, input::Vector{String}, type::String, mode::String)
+function _manage_choice(obj::HDF5_Obj, input::Vector{String}, type::String, mode::String)
     if type == "times"
         _manage_choice(obj, [parse(Float64, i) for i in input], type, mode)
     else
@@ -95,7 +94,7 @@ function _manage_choice(obj::HDF5_Obj, input::Int64, type::String, action::Strin
     _set_viewchoice(obj, [prefix_inc * string(input)], type, action)
 end
 #only type "increments" possible
-function _manage_choice(obj, input::Vector{Int64}, type::String, mode::String)
+function _manage_choice(obj::HDF5_Obj, input::Vector{Int64}, type::String, mode::String)
     _set_viewchoice(obj, [prefix_inc * string(i) for i in input], type, mode)
 end
 #only type "times" possible
@@ -103,7 +102,7 @@ function _manage_choice(obj::HDF5_Obj, input::Float64, type::String, action::Str
     _manage_choice(obj, [input], type, action)
 end
 #only type "times" possible
-function _manage_choice(obj, input::Vector{<:AbstractFloat}, type::String, action::String)
+function _manage_choice(obj::HDF5_Obj, input::Vector{<:AbstractFloat}, type::String, action::String)
     choice = String[]
     for (i, time) in enumerate(getproperty(obj, Symbol(type)))
         for j in input
@@ -131,7 +130,7 @@ end
 
 
 function get(obj::HDF5_Obj, output::Union{String,Vector{String}}="*")
-    file = HDF5.h5open(obj.fname, "r")
+    file = HDF5.h5open(obj.filename, "r")
     dict = Dict()
 
     all = output == "*" ? true : false
@@ -141,7 +140,7 @@ function get(obj::HDF5_Obj, output::Union{String,Vector{String}}="*")
         dict[inc] = Dict([("phase", Dict()), ("homogenization", Dict()), ("geometry", Dict())])
         for out in keys(file[inc*"/geometry"])
             if all || out in output
-                r[inc]["geometry"][out] = _read(file[inc*"/geometry/"*out])
+                dict[inc]["geometry"][out] = _read(file[inc*"/geometry/"*out])
             end
         end
         for ty in ["phase", "homogenization"]
@@ -174,8 +173,8 @@ function place(
     obj::HDF5_Obj,
     output::Union{String,Vector{String}}="*";
     constituents::Union{Vector{Int64},Nothing}=nothing,
-    fill_float::Float32=Float32(NaN),
-    fill_int::Int32=Int32(0)
+    fill_float::Float64=NaN,
+    fill_int::Int64=0
 )
 
     all = output == "*" ? true : false
@@ -183,13 +182,13 @@ function place(
 
     dict::Dict{String,Dict} = Dict()
 
-    constituents_ = constituents === nothing ? range(1, obj.N_constituents) : constituents #maybe redo
+    constituents_ = constituents === nothing ? range(1, obj.N_constituents) : constituents 
 
     suffixes = obj.N_constituents == 1 || length(constituents_) < 2 ? [""] : ["#" * string(c) for c in constituents_]
 
     (at_cell_ph, in_data_ph, at_cell_ho, in_data_ho) = _mappings(obj)
 
-    file = HDF5.h5open(obj.fname, "r")
+    file = HDF5.h5open(obj.filename, "r")
     for inc in obj.visible["increments"]
         dict[inc] = Dict([("phase", Dict()), ("homogenization", Dict()), ("geometry", Dict())])
         for out in keys(file[inc*"/geometry"])
@@ -208,7 +207,7 @@ function place(
                             if all || out in output
                                 data = _read(file[inc*"/"*ty*"/"*label*"/"*field*"/"*out])
                                 type = eltype(parent(data))
-                                fill_val = type <: Integer ? fill_int : fill_float
+                                fill_val = type <: Integer ? Int32(fill_int) : Float32(fill_float)
                                 if ty == "phase"
                                     if !(out * suffixes[1] in keys(dict[inc][ty][field]))
                                         for suffix in suffixes
@@ -247,8 +246,8 @@ function export_VTK(obj::HDF5_Obj,
     output::Union{String,Vector{String}}="*";
     mode::String="cell", #only cell-mode now
     constituents::Union{Vector{Int64},Nothing}=nothing,
-    fill_float::Float32=Float32(NaN),
-    fill_int::Int32=Int32(0),
+    fill_float::Float64=NaN,
+    fill_int::Int64=0,
     parallel::Bool=true #does nothing now
 )
 
@@ -268,7 +267,7 @@ function export_VTK(obj::HDF5_Obj,
 
     (at_cell_ph, in_data_ph, at_cell_ho, in_data_ho) = _mappings(obj)
 
-    file = HDF5.h5open(obj.fname, "r")
+    file = HDF5.h5open(obj.filename, "r")
 
     cells = read_attribute(file["geometry"], "cells")
     origin = read_attribute(file["geometry"], "origin")
@@ -282,7 +281,7 @@ function export_VTK(obj::HDF5_Obj,
 
     for inc in obj.visible["increments"]
         k_inc = parse(Int64, split(inc, prefix_inc)[end])
-        vtkfile = vtk_grid(_trunc_name(obj.file) * "_increm" * string(k_inc, pad=n_digits), x, y, z) #TODO different for mode "point" ?
+        vtkfile = vtk_grid(_trunc_name(obj.filename) * "_increm" * string(k_inc, pad=n_digits), x, y, z) #TODO different for mode "point" ?
 
         vtkfile["created", VTKFieldData()] = read_attribute(file, "creator") * " (" * read_attribute(file, "created") * ")"
         if mode == "cell"
@@ -298,7 +297,7 @@ function export_VTK(obj::HDF5_Obj,
                         for out in keys(file[inc*"/"*ty*"/"*label*"/"*field])
                             if all || out in output
                                 data = _read(file[inc*"/"*ty*"/"*label*"/"*field*"/"*out])
-                                fill_val = eltype(parent(data)) <: Integer ? fill_int : fill_float
+                                fill_val = eltype(parent(data)) <: Integer ? Int32(fill_int) : Float32(fill_float)
                                 if ty == "phase"
                                     if !(out * suffixes[1] in keys(outs))
                                         for suffix in suffixes
@@ -342,7 +341,7 @@ function _empty_like(obj::HDF5_Obj, dataset, fill_val)
 end
 
 function _mappings(obj::HDF5_Obj)
-    file = HDF5.h5open(obj.fname, "r")
+    file = HDF5.h5open(obj.filename, "r")
 
     at_cell_ph = [Dict{String,Vector{Int64}}() for _ in 1:obj.N_constituents]
     in_data_ph = [Dict{String,Vector{Int64}}() for _ in 1:obj.N_constituents]
@@ -353,7 +352,6 @@ function _mappings(obj::HDF5_Obj)
     homogenization_dset = file["cell_to/homogenization"][1:end]
     homogenization = getindex.(homogenization_dset, :label)
 
-    #from file["cell_to/phase] read columnwise the indices where the different Phases are in at_cell_ph and their indices in in_data_ph
     for c in range(1, obj.N_constituents)
         for label in obj.visible["phases"]
             at_cell_ph[c][label] = findall(x -> x == label, phase[c, :])
@@ -378,7 +376,7 @@ end
 function read_HDF5(filename::String)
     #no hdf5 file?
     if !HDF5.ishdf5(filename)
-        error("No HDF5-file") #raise error?
+        error("No HDF5-file") 
     end
     file = HDF5.h5open(filename, "r") # "r": read-only 
 
@@ -432,11 +430,9 @@ function read_HDF5(filename::String)
         "fields" => fields,
     )
 
-    fname = filename 
-
     _protected = true
     close(file)
-    return HDF5_Obj(filename, export_setup, structured, cells, _size, origin, increments, times, N_constituents, N_materialpoints, homogenizations, phases, fields, visible, fname, _protected)
+    return HDF5_Obj(filename, version_major, version_minor, structured, cells, _size, origin, increments, times, N_constituents, N_materialpoints, homogenizations, phases, fields, visible, _protected)
 end
 
 end   #end of module

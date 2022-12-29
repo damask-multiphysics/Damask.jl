@@ -1,4 +1,4 @@
-module damask
+module Damask
 import Base: view, get, getproperty
 
 using HDF5, Metadata, NaturalSort, WriteVTK

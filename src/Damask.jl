@@ -1,16 +1,22 @@
 module Damask
-import Base: view, get, getproperty
 
+import Base: view, get
 using HDF5, Metadata, NaturalSort, WriteVTK
-export read_HDF5, get, view, place, export_VTK,getproperty
+export read_HDF5, get, view, view_more, view_less, place, export_VTK
 
 
 const prefix_inc = "increment_"
 
+"""
+    HDF5_Obj
+
+Contains informations and a view of a DADF5 (DAMASK HDF5) file.
+Is returned by [`read_HDF5`](@ref)
+"""
 struct HDF5_Obj
     filename::String
-    version_major::Int64
-    version_minor::Int64
+    version_major::Int8
+    version_minor::Int8
     structured::Bool
     cells::Vector{Int64}
     size::Vector{Float64}
@@ -26,31 +32,46 @@ struct HDF5_Obj
     _protected::Bool
 end
 
+"""Presentation of `HDF5_Obj` showing `obj.filename` and `obj.visible`"""
 Base.show(io::IO, obj::HDF5_Obj) = begin
-    str::String = string("Damask-Result-Object:\n  Filename: ", obj.filename, "\n  Visible:  increments:    ", obj.visible["increments"], "\n            phases:          ", obj.visible["phases"], "\n            homogenizations: ", obj.visible["homogenizations"], "\n            fields:          ",obj.visible["fields"],"\n")
-    print(io, str, "\n")
+    str = "Damask-HDF5-Object:\nFilename:\t$(obj.filename)\nVisible:\tincrements:\t $(obj.visible["increments"])\n\t\tphases:\t\t $(obj.visible["phases"])\n\t\thomogenizations: $(obj.visible["homogenizations"])\n\t\tfields:\t\t $(obj.visible["fields"])\n"
+    print(io, str)
 end
 
+"""
+    view(obj::HDF5_Obj; <keyword arguments>)
+    
+Return a copy of `obj` with the selected view.
+True or "*" as keyword value selects all.
+False or String[] as keyword value deselects all.
+
+# Arguments
+- `obj::HDF_Obj` : HDF5_obj to create a view of
+- `increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing` : Number(s) of increments to select. Negative Integers allowed eg. -1 for last increment, -2 for second last. Defaults to all.
+- `times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,` : Simulation time(s) of increments to select. Defaults to all. Mutually exclusive to increments.
+- `phases::Union{String,Vector{String},Bool,Nothing}=nothing,` : Name(s) of phases to select. Defaults to all.
+- `homogenizations::Union{String,Vector{String},Bool,Nothing}=nothing,`: Name(s) of homogenizations to select. Defaults to all.
+- `fields::Union{String,Vector{String},Bool,Nothing}=nothing,` : Name(s) of fields to select. Defaults to all.
+- `protected::Union{Bool,Nothing}=nothing` : Protection status of existing data.
+
+# Examples
+Create a view on the last increment
+```jldoctest
+julia> using Damask
+julia> res = read_HDF5("my_file.hdf5")
+julia> v = view(res,increments = -1)
+```
+"""
 function view(
     obj::HDF5_Obj;
-    action::String="set", #where action in ["set","add","del"], only "set" now
     increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
     times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
     phases::Union{String,Vector{String},Bool,Nothing}=nothing,
-    homogenization::Union{String,Vector{String},Bool,Nothing}=nothing,
+    homogenizations::Union{String,Vector{String},Bool,Nothing}=nothing,
     fields::Union{String,Vector{String},Bool,Nothing}=nothing,
-    protected::Union{Bool,Nothing}=nothing
+    protected::Union{Bool,Nothing}=nothing #does nothing now
 )
-    if increments !== nothing && times !== nothing
-        error("\"increments\" and \"times\" are mutually exclusive")
-    end
-
-    dup = deepcopy(obj)
-    for (type, input) in zip(["increments", "times", "phases", "homogenizations", "fields"], [increments, times, phases, homogenization, fields])
-        if input !== nothing
-            _manage_choice(dup, input, type, action)
-        end
-    end
+    dup = _manage_view(obj, "set", increments, times, phases, homogenizations, fields)
     if protected !== nothing
         if protected == false
             println("Warning: Modification of existing datasets allowed")
@@ -60,14 +81,108 @@ function view(
     return dup
 end
 
-#@enum mode set add del #maybe? or parameter datatype
+"""
+    view_more(obj::HDF5_Obj; <keyword arguments>)
 
+Return a copy of `obj` with the selected increased view.
+True or "*" as value as keyword value selects all.
+False or String[] as keyword value deselects all.
+
+# Arguments
+- `obj::HDF_Obj` : HDF5_obj to create a view of
+- `increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing` : Number(s) of increments to select. Negative Integers allowed eg. -1 for last increment. Defaults to all.
+- `times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,` : Simulation time(s) of increments to select. Defaults to all. Mutually exclusive to increments.
+- `phases::Union{String,Vector{String},Bool,Nothing}=nothing,` : Name(s) of phases to select. Defaults to all.
+- `homogenizations::Union{String,Vector{String},Bool,Nothing}=nothing,`: Name(s) of homogenizations to select. Defaults to all.
+- `fields::Union{String,Vector{String},Bool,Nothing}=nothing,` : Name(s) of fields to select. Defaults to all.
+
+# Examples
+Increasing a view from first increment to increment 0,2,4 :
+```jldoctest
+julia> using Damask
+julia> r = view(read_HDF5("my_file.hdf5"), increments=0)
+julia> r2 = view_more(r, increments=[2,4])
+```
+"""
+view_more(
+    obj::HDF5_Obj;
+    increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
+    times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
+    phases::Union{String,Vector{String},Bool,Nothing}=nothing,
+    homogenizations::Union{String,Vector{String},Bool,Nothing}=nothing,
+    fields::Union{String,Vector{String},Bool,Nothing}=nothing
+) = _manage_view(obj, "add", increments, times, phases, homogenizations, fields)
+
+"""
+    view_less(obj::HDF5_Obj; <keyword arguments>)
+    
+Return a copy of `obj` with the selected reduced view.
+True or "*" as value as keyword value deselect all.
+False or String[] for keyword value does nothing.
+
+# Arguments
+- `obj::HDF_Obj` : HDF5_obj to create a view of
+- `increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing` : Number(s) of increments to select. Negative Integers allowed eg. -1 for last increment. Defaults to all.
+- `times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,` : Simulation time(s) of increments to select. Defaults to all. Mutually exclusive to increments.
+- `phases::Union{String,Vector{String},Bool,Nothing}=nothing,` : Name(s) of phases to select. Defaults to all.
+- `homogenizations::Union{String,Vector{String},Bool,Nothing}=nothing,`: Name(s) of homogenizations to select. Defaults to all.
+- `fields::Union{String,Vector{String},Bool,Nothing}=nothing,` : Name(s) of fields to select. Defaults to all.
+
+# Examples
+Increasing a view from first increment to increment 0,2,4 :
+```jldoctest
+julia> using Damask
+julia> r = view(read_HDF5("my_file.hdf5"), increments=0)
+julia> r2 = view_more(r, increments=[2,4])
+```
+"""
+view_less(
+    obj::HDF5_Obj;
+    increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
+    times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
+    phases::Union{String,Vector{String},Bool,Nothing}=nothing,
+    homogenizations::Union{String,Vector{String},Bool,Nothing}=nothing,
+    fields::Union{String,Vector{String},Bool,Nothing}=nothing
+) = _manage_view(obj, "del", increments, times, phases, homogenizations, fields)
+
+
+"""
+    _manage_view(obj::HDF5_Obj; <keyword arguments>)
+
+Create a copy of `obj` and set its view by calling [`_manage_choice`](@ref) on each keyword argument
+"""
+function _manage_view(
+    obj::HDF5_Obj,
+    action::String,
+    increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
+    times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
+    phases::Union{String,Vector{String},Bool,Nothing}=nothing,
+    homogenizations::Union{String,Vector{String},Bool,Nothing}=nothing,
+    fields::Union{String,Vector{String},Bool,Nothing}=nothing,
+)
+    if increments !== nothing && times !== nothing
+        error("\"increments\" and \"times\" are mutually exclusive")
+    end
+    dup = deepcopy(obj)
+    for (type, input) in [("increments", increments), ("times", times), ("phases", phases), ("homogenizations", homogenizations), ("fields", fields)]
+        if input !== nothing
+            _manage_choice(dup, input, type, action)
+        end
+    end
+    return dup
+end
+
+"""
+    _manage_choice(obj::HDF5_Obj, input::Bool, type::String, action::String)
+
+Processes `input` for `type` where type is a keyword argument of [`view`](@ref). Should call [`_set_viewchoice`](@ref) or another [`_manage_choice`]-Method.
+"""
 function _manage_choice(obj::HDF5_Obj, input::Bool, type::String, action::String)
     if type == "times"
         type = "increments"
     end
     if input == true
-        _set_viewchoice(obj, getproperty(obj, Symbol(type)), type, action) #field name must be the same as type
+        _set_viewchoice(obj, getproperty(obj, Symbol(type)), type, action) #obj.type must have same name
     else
         _set_viewchoice(obj, String[], type, action)
     end
@@ -77,11 +192,12 @@ function _manage_choice(obj::HDF5_Obj, input::String, type::String, action::Stri
     if input == "*"
         _manage_choice(obj, true, type, action)
     elseif type == "times"
-        _manage_choice(obj, [parse(Float64, i)], type, action)
+        _manage_choice(obj, [parse(Float64, input)], type, action)
     else
         _set_viewchoice(obj, [input], type, action)
     end
 end
+
 function _manage_choice(obj::HDF5_Obj, input::Vector{String}, type::String, mode::String)
     if type == "times"
         _manage_choice(obj, [parse(Float64, i) for i in input], type, mode)
@@ -90,12 +206,20 @@ function _manage_choice(obj::HDF5_Obj, input::Vector{String}, type::String, mode
     end
 end
 #only type "increments" possible
-function _manage_choice(obj::HDF5_Obj, input::Int64, type::String, action::String)
-    _set_viewchoice(obj, [prefix_inc * string(input)], type, action)
+function _manage_choice(obj::HDF5_Obj, input::Integer, type::String, action::String)
+    _manage_choice(obj, [input], type, action)
 end
 #only type "increments" possible
 function _manage_choice(obj::HDF5_Obj, input::Vector{Int64}, type::String, mode::String)
-    _set_viewchoice(obj, [prefix_inc * string(i) for i in input], type, mode)
+    choice = String[]
+    for i in input
+        if i >= 0
+            push!(choice, prefix_inc * string(i))
+        elseif i < 0 && abs(i) <= length(obj.increments)
+            push!(choice, obj.increments[end+i+1])
+        end
+    end
+    _set_viewchoice(obj, choice, type, mode)
 end
 #only type "times" possible
 function _manage_choice(obj::HDF5_Obj, input::Float64, type::String, action::String)
@@ -114,6 +238,12 @@ function _manage_choice(obj::HDF5_Obj, input::Vector{<:AbstractFloat}, type::Str
     _set_viewchoice(obj, choice, "increments", action)
 end
 
+"""
+    _set_viewchoice(obj::HDF5_Obj, choice::Vector{String}, type::String, action::String)
+
+Set view `choice`s of `type` to `obj.visible[type]`. 
+`action` must be in ["set", "del", "add"] and specifies if `choice` should be set, added to or deleted from the current view of `obj`. 
+"""
 function _set_viewchoice(obj::HDF5_Obj, choice::Vector{String}, type::String, action::String)
     existing = Set(obj.visible[type])
     valid = intersect(Set(choice), Set(getproperty(obj, Symbol(type))))
@@ -121,15 +251,34 @@ function _set_viewchoice(obj::HDF5_Obj, choice::Vector{String}, type::String, ac
         obj.visible[type] = sort!([s for s in valid], lt=natural)#maybe bad: from vector to set to vector
     elseif action == "add"
         add = union(existing, valid)
-        obj.visible[type] = sort!([s for s in valid], lt=natural)
+        obj.visible[type] = sort!([s for s in add], lt=natural)
     elseif action == "del"
         diff = setdiff(existing, valid)
-        obj.visible[type] = sort!([s for s in valid], lt=natural)
+        obj.visible[type] = sort!([s for s in diff], lt=natural)
     end
 end
 
+"""
+    get(obj::HDF5_Obj, output::Union{String,Vector{String}}="*"; flatten::Bool=true, prune::Bool=true)
 
-function get(obj::HDF5_Obj, output::Union{String,Vector{String}}="*")
+Collect data reflecting the group/folder structure in the DADF5 file.
+Only datasets in the current view and optionally specified by `output` are collected.
+
+# Arguments
+- obj: HDF5_Obj to get data from
+- output : Names of the datasets to read.
+            Defaults to '*', in which case all datasets are read.
+- flatten : Remove singular levels of the folder hierarchy.
+            This might be beneficial in case of single increment,
+            phase/homogenization, or field. Defaults to True.
+- prune : Remove branches with no data. Defaults to True.
+"""
+function get(
+    obj::HDF5_Obj,
+    output::Union{String,Vector{String}}="*";
+    flatten::Bool=true,
+    prune::Bool=true
+)
     file = HDF5.h5open(obj.filename, "r")
     dict = Dict()
 
@@ -159,9 +308,20 @@ function get(obj::HDF5_Obj, output::Union{String,Vector{String}}="*")
             end
         end
     end
+    close(file)
+    if prune
+        dict = _dict_prune(dict)
+    end
+    if flatten && dict isa Dict
+        dict = _dict_flatten(dict)
+    end
     return dict
 end
+"""
+    _read(dataset::HDF5.Dataset)
 
+Read a HDF5.Dataset including metadata.
+"""
 function _read(dataset::HDF5.Dataset)
     d = attrs(dataset)
     meta = NamedTuple{Tuple(Symbol.(keys(d)))}(values(d))
@@ -169,30 +329,59 @@ function _read(dataset::HDF5.Dataset)
     return attach_metadata(arr, meta)
 end
 
+
+"""
+    place(obj::HDF5_Obj, output::Union{String,Vector{String}}="*"; constituents::Union{Vector{Int64},Nothing}=nothing, flatten::Bool=true, prune::Bool=true, fill_float::Float64=NaN, fill_int::Int64=0)
+
+Merge data into spatial order that is compatible with the VTK representation.
+
+The returned data structure reflects the group/folder structure in the DADF5 file.
+Multi-phase data is fused into a single output.
+`place` is equivalent to `get` if only one phase/homogenization
+and one constituent is present.
+
+# Arguments
+- obj : HDF5_Obj to be worked on
+- output : 
+    Names of the datasets to read.
+    Defaults to '*', in which case all datasets of the current view are exported.
+- constituents : 
+    Constituents to consider.
+    Defaults to nothing, in which case all constituents are considered.
+- fill_float :
+    Fill value for non-existent entries of floating point type.
+    Defaults to NaN.
+- fill_int : 
+    Fill value for non-existent entries of integer type.
+    Defaults to 0.
+"""
 function place(
     obj::HDF5_Obj,
     output::Union{String,Vector{String}}="*";
-    constituents::Union{Vector{Int64},Nothing}=nothing,
+    constituents::Union{Vector{Int64},Int64,Nothing}=nothing,
+    flatten::Bool=true,
+    prune::Bool=true,
     fill_float::Float64=NaN,
     fill_int::Int64=0
 )
-
-    all = output == "*" ? true : false
+    all_out = output == "*" ? true : false
     output = output isa String ? [output] : output
 
-    dict::Dict{String,Dict} = Dict()
-
-    constituents_ = constituents === nothing ? range(1, obj.N_constituents) : constituents 
+    constituents isa Int64 ? [constituents] : constituents
+    constituents_ = constituents === nothing ? range(1, obj.N_constituents) : constituents
+    if !all(i->(i in 1:obj.N_constituents), constituents_)
+        error("constituent number does not exist")
+    end
 
     suffixes = obj.N_constituents == 1 || length(constituents_) < 2 ? [""] : ["#" * string(c) for c in constituents_]
 
     (at_cell_ph, in_data_ph, at_cell_ho, in_data_ho) = _mappings(obj)
-
+    dict = Dict()
     file = HDF5.h5open(obj.filename, "r")
     for inc in obj.visible["increments"]
         dict[inc] = Dict([("phase", Dict()), ("homogenization", Dict()), ("geometry", Dict())])
         for out in keys(file[inc*"/geometry"])
-            if all || out in output
+            if all_out || out in output
                 dict[inc]["geometry"][out] = _read(file[inc*"/geometry/"*out])
             end
         end
@@ -204,8 +393,9 @@ function place(
                             dict[inc][ty][field] = Dict()
                         end
                         for out in keys(file[inc*"/"*ty*"/"*label*"/"*field])
-                            if all || out in output
+                            if all_out || out in output
                                 data = _read(file[inc*"/"*ty*"/"*label*"/"*field*"/"*out])
+                                dims = ntuple(i -> :, ndims(data) - 1)
                                 type = eltype(parent(data))
                                 fill_val = type <: Integer ? Int32(fill_int) : Float32(fill_float)
                                 if ty == "phase"
@@ -215,22 +405,14 @@ function place(
                                         end
                                     end
                                     for (c, suffix) in zip(constituents_, suffixes)
-                                        if ndims(data) == 3
-                                            dict[inc][ty][field][out*suffix][:, :, at_cell_ph[c][label]] = data[:, :, in_data_ph[c][label]]
-                                        elseif ndims(data) == 2
-                                            dict[inc][ty][field][out*suffix][:, at_cell_ph[c][label]] = data[:, in_data_ph[c][label]]
-                                        end
+                                        dict[inc][ty][field][out*suffix][dims..., at_cell_ph[c][label]] = data[dims..., in_data_ph[c][label]]
                                     end
                                 end
                                 if ty == "homogenization"
                                     if !(out in keys(dict[inc][ty][field]))
                                         dict[inc][ty][field][out] = _empty_like(obj, data, fill_val)
                                     end
-                                    if ndims(data) == 2
-                                        dict[inc][ty][field][out][:, at_cell_ho[label]] = data[:, in_data_ho[label]]
-                                    elseif ndims(data) == 1
-                                        dict[inc][ty][field][out][at_cell_ho[label]] = data[in_data_ho[label]]
-                                    end
+                                    dict[inc][ty][field][out][dims..., at_cell_ho[label]] = data[dims..., in_data_ho[label]]
                                 end
                             end
                         end
@@ -239,16 +421,46 @@ function place(
             end
         end
     end
+    close(file)
+    if prune
+        dict = _dict_prune(dict)
+    end
+    if flatten && dict isa Dict
+        dict = _dict_flatten(dict)
+    end
     return dict
 end
 
+"""
+    export_VTK(obj::HDF5_Obj, output::Union{String,Vector{String}}="*"; mode::String="cell", constituents::Union{Vector{Int64},Nothing}=nothing, fill_float::Float64=NaN, fill_int::Int64=0)
+
+Export to VTK cell data. Only datasets in the current view and optionally specified by `output` are exported.
+Create one VTK file (.vti) per visible increment.
+
+# Arguments
+- obj : HDF5_Obj to be exported 
+- output : 
+    Names of the datasets to export to the VTK file.
+    Defaults to '*', in which case all datasets of the current view are exported.
+- mode : {'cell', 'point'}
+    Export in cell format or point format. Only cell format possible now.
+    Defaults to 'cell'.
+- constituents :  
+    optional constituents to consider.
+    Defaults to nothing, in which case all constituents are considered.
+- fill_float : 
+    Fill value for non-existent entries of floating point type.
+    Defaults to NaN.
+- fill_int :
+    Fill value for non-existent entries of integer type.
+    Defaults to 0.
+"""
 function export_VTK(obj::HDF5_Obj,
     output::Union{String,Vector{String}}="*";
     mode::String="cell", #only cell-mode now
     constituents::Union{Vector{Int64},Nothing}=nothing,
     fill_float::Float64=NaN,
-    fill_int::Int64=0,
-    parallel::Bool=true #does nothing now
+    fill_int::Int64=0
 )
 
     if lowercase(mode) == "cell"
@@ -281,7 +493,7 @@ function export_VTK(obj::HDF5_Obj,
 
     for inc in obj.visible["increments"]
         k_inc = parse(Int64, split(inc, prefix_inc)[end])
-        vtkfile = vtk_grid(_trunc_name(obj.filename) * "_increm" * string(k_inc, pad=n_digits), x, y, z) #TODO different for mode "point" ?
+        vtkfile = vtk_grid(split(obj.filename, ".")[1] * "_increm" * string(k_inc, pad=n_digits), x, y, z) #TODO different for mode "point" ?
 
         vtkfile["created", VTKFieldData()] = read_attribute(file, "creator") * " (" * read_attribute(file, "created") * ")"
         if mode == "cell"
@@ -297,6 +509,7 @@ function export_VTK(obj::HDF5_Obj,
                         for out in keys(file[inc*"/"*ty*"/"*label*"/"*field])
                             if all || out in output
                                 data = _read(file[inc*"/"*ty*"/"*label*"/"*field*"/"*out])
+                                dims = ntuple(i -> :, ndims(data) - 1)
                                 fill_val = eltype(parent(data)) <: Integer ? Int32(fill_int) : Float32(fill_float)
                                 if ty == "phase"
                                     if !(out * suffixes[1] in keys(outs))
@@ -305,27 +518,20 @@ function export_VTK(obj::HDF5_Obj,
                                         end
                                     end
                                     for (c, suffix) in zip(constituents_, suffixes)
-                                        if ndims(data) == 3
-                                            outs[out*suffix][:, :, at_cell_ph[c][label]] = data[:, :, in_data_ph[c][label]]
-                                        elseif ndims(data) == 2
-                                            outs[out*suffix][:, at_cell_ph[c][label]] = data[:, in_data_ph[c][label]]
-                                        end
+                                        outs[out*suffix][dims..., at_cell_ph[c][label]] = data[dims..., in_data_ph[c][label]]
                                     end
                                 end
                                 if ty == "homogenization"
                                     if !(out in keys(outs))
                                         outs[out] = _empty_like(obj, data, fill_val)
                                     end
-                                    if ndims(data) == 2
-                                        outs[out][:, at_cell_ho[label]] = data[:, in_data_ho[label]]
-                                    elseif ndims(data) == 1
-                                        outs[out][at_cell_ho[label]] = data[in_data_ho[label]]
-                                    end
+                                    outs[out][dims..., at_cell_ho[label]] = data[dims..., in_data_ho[label]]
                                 end
                             end
                         end
                     end
                 end
+
                 for (label, dataset) in outs
                     vtkfile["/"*ty*"/"*field*"/"*label*" / "*dataset.unit] = dataset
                 end
@@ -333,13 +539,25 @@ function export_VTK(obj::HDF5_Obj,
         end
         vtk_save(vtkfile)
     end
+    close(file)
 end
 
+"""
+    _empty_like(obj::HDF5_Obj, dataset, fill_val)
+
+Creates `Array` filled with `fill_val` of the dimensions of `dataset` in the first dimensions 
+and the amount of `obj.N_materialpoints` in the last dimension. Attach Metadata of the dataset.
+"""
 function _empty_like(obj::HDF5_Obj, dataset, fill_val)
     shape = (size(dataset)[1:end-1]..., obj.N_materialpoints)
     return attach_metadata(fill(fill_val, shape), metadata(dataset))
 end
 
+"""
+    _mappings(obj::HDF5_Obj)
+
+Extracts mapping data for phases and homogenizations to place data spatially
+"""
 function _mappings(obj::HDF5_Obj)
     file = HDF5.h5open(obj.filename, "r")
 
@@ -362,33 +580,79 @@ function _mappings(obj::HDF5_Obj)
         at_cell_ho[label] = findall(x -> x == label, homogenization)
         in_data_ho[label] = getindex.(homogenization_dset[at_cell_ho[label]], :entry) .+ 1
     end
-
+    close(file)
     return (at_cell_ph, in_data_ph, at_cell_ho, in_data_ho)
 end
 
-function _trunc_name(filename::String)
-    arr = split(filename, "\\")
-    trunc = split(arr[end], ".")
-    return trunc[1]
+
+
+"""
+    _dict_prune(d::Dict)
+
+Recursively remove empty dictionaries. Return a new pruned `Dict` which may be empty. 
+"""
+function _dict_prune(d::Dict)
+    new = Dict{String,Any}()
+    for k in keys(d)
+        if d[k] isa Dict
+            d[k] = _dict_prune(d[k])
+        end
+        if !(d[k] isa Dict) || !isempty(d[k])
+            new[k] = d[k]
+        end
+    end
+    return new
 end
 
+"""
+    _dict_flatten(d::Dict)
 
+Recursively remove keys of single-entry dictionaries. Return a new flattened `Dict` or a single Array in `d`.
+"""
+function _dict_flatten(d::Dict)
+    if length(d) == 1
+        entry = d[collect(keys(d))[1]]
+        new = _dict_flatten(entry)
+    else
+        new = Dict()
+        for k in keys(d)
+            new[k] = _dict_flatten(d[k])
+        end
+    end
+    return new
+end
+
+_dict_flatten(d::Any) = d
+
+"""
+    read_HDF5(filename::String)
+
+Starting point for post-processing. 
+Read a DADF5 (DAMASK HDF5) file containing DAMASK results and
+get a HDF5_Obj returned needed for further post-processing.
+
+# Examples
+```jldoctest
+julia> using Damask
+julia> res = read_HDF5("my_file.hdf5")
+```
+If the path/filename contains backslashes use "raw" in front of it or use double backslashes 
+```jldoctest
+julia> res = read_HDF5(raw"my_file.hdf5")
+```
+"""
 function read_HDF5(filename::String)
     #no hdf5 file?
     if !HDF5.ishdf5(filename)
-        error("No HDF5-file") 
+        throw(Base.IOError("No HDF5-File", 0))
     end
     file = HDF5.h5open(filename, "r") # "r": read-only 
 
     # right version
-    version_minor = HDF5.read_attribute(file, "DADF5_version_minor")
-    version_major = HDF5.read_attribute(file, "DADF5_version_major")
+    version_minor = Int8(HDF5.read_attribute(file, "DADF5_version_minor"))
+    version_major = Int8(HDF5.read_attribute(file, "DADF5_version_major"))
     if version_major != 0 || version_minor < 12 || version_minor > 14
         error("unsupported DADF5 version ", version_major, ".", version_minor)
-    end
-    export_setup = true #?
-    if version_major == 0 && version_minor < 14
-        export_setup = false #?
     end
 
     #Structured
@@ -423,7 +687,7 @@ function read_HDF5(filename::String)
         append!(fields, keys(file[string("/", increments[1], "/homogenization/", m)]))
     end
     fields = unique!(sort!(fields))
-
+    close(file)
     visible = Dict{String,Vector{String}}("increments" => increments,
         "phases" => phases,
         "homogenizations" => homogenizations,
@@ -431,7 +695,7 @@ function read_HDF5(filename::String)
     )
 
     _protected = true
-    close(file)
+
     return HDF5_Obj(filename, version_major, version_minor, structured, cells, _size, origin, increments, times, N_constituents, N_materialpoints, homogenizations, phases, fields, visible, _protected)
 end
 

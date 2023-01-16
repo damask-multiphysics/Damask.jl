@@ -8,12 +8,12 @@ export read_HDF5, get, view, view_more, view_less, place, export_VTK
 const prefix_inc = "increment_"
 
 """
-    HDF5_Obj
+    Result
 
 Contains informations and a view of a DADF5 (DAMASK HDF5) file.
 Is returned by [`read_HDF5`](@ref)
 """
-struct HDF5_Obj
+struct Result
     filename::String
     version_major::Int8
     version_minor::Int8
@@ -32,14 +32,14 @@ struct HDF5_Obj
     _protected::Bool
 end
 
-"""Presentation of `HDF5_Obj` showing `obj.filename` and `obj.visible`"""
-Base.show(io::IO, obj::HDF5_Obj) = begin
+"""Presentation of `Result` showing `obj.filename` and `obj.visible`"""
+Base.show(io::IO, obj::Result) = begin
     str = "Damask-HDF5-Object:\nFilename:\t$(obj.filename)\nVisible:\tincrements:\t $(obj.visible["increments"])\n\t\tphases:\t\t $(obj.visible["phases"])\n\t\thomogenizations: $(obj.visible["homogenizations"])\n\t\tfields:\t\t $(obj.visible["fields"])\n"
     print(io, str)
 end
 
 """
-    view(obj::HDF5_Obj; <keyword arguments>)
+    view(obj::Result; <keyword arguments>)
     
 Return a copy of `obj` with the selected view.
 True or "*" as keyword value selects all.
@@ -63,7 +63,7 @@ julia> v = view(res,increments = -1)
 ```
 """
 function view(
-    obj::HDF5_Obj;
+    obj::Result;
     increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
     times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
     phases::Union{String,Vector{String},Bool,Nothing}=nothing,
@@ -82,7 +82,7 @@ function view(
 end
 
 """
-    view_more(obj::HDF5_Obj; <keyword arguments>)
+    view_more(obj::Result; <keyword arguments>)
 
 Return a copy of `obj` with the selected increased view.
 True or "*" as value as keyword value selects all.
@@ -105,7 +105,7 @@ julia> r2 = view_more(r, increments=[2,4])
 ```
 """
 view_more(
-    obj::HDF5_Obj;
+    obj::Result;
     increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
     times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
     phases::Union{String,Vector{String},Bool,Nothing}=nothing,
@@ -114,7 +114,7 @@ view_more(
 ) = _manage_view(obj, "add", increments, times, phases, homogenizations, fields)
 
 """
-    view_less(obj::HDF5_Obj; <keyword arguments>)
+    view_less(obj::Result; <keyword arguments>)
     
 Return a copy of `obj` with the selected reduced view.
 True or "*" as value as keyword value deselect all.
@@ -137,7 +137,7 @@ julia> r2 = view_more(r, increments=[2,4])
 ```
 """
 view_less(
-    obj::HDF5_Obj;
+    obj::Result;
     increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
     times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
     phases::Union{String,Vector{String},Bool,Nothing}=nothing,
@@ -147,12 +147,12 @@ view_less(
 
 
 """
-    _manage_view(obj::HDF5_Obj; <keyword arguments>)
+    _manage_view(obj::Result; <keyword arguments>)
 
 Create a copy of `obj` and set its view by calling [`_manage_choice`](@ref) on each keyword argument
 """
 function _manage_view(
-    obj::HDF5_Obj,
+    obj::Result,
     action::String,
     increments::Union{Int,Vector{Int},String,Vector{String},Bool,Nothing}=nothing,
     times::Union{<:AbstractFloat,Vector{<:AbstractFloat},String,Vector{String},Bool,Nothing}=nothing,
@@ -173,11 +173,11 @@ function _manage_view(
 end
 
 """
-    _manage_choice(obj::HDF5_Obj, input::Bool, type::String, action::String)
+    _manage_choice(obj::Result, input::Bool, type::String, action::String)
 
 Processes `input` for `type` where type is a keyword argument of [`view`](@ref). Should call [`_set_viewchoice`](@ref) or another [`_manage_choice`]-Method.
 """
-function _manage_choice(obj::HDF5_Obj, input::Bool, type::String, action::String)
+function _manage_choice(obj::Result, input::Bool, type::String, action::String)
     if type == "times"
         type = "increments"
     end
@@ -188,7 +188,7 @@ function _manage_choice(obj::HDF5_Obj, input::Bool, type::String, action::String
     end
 end
 
-function _manage_choice(obj::HDF5_Obj, input::String, type::String, action::String)
+function _manage_choice(obj::Result, input::String, type::String, action::String)
     if input == "*"
         _manage_choice(obj, true, type, action)
     elseif type == "times"
@@ -198,7 +198,7 @@ function _manage_choice(obj::HDF5_Obj, input::String, type::String, action::Stri
     end
 end
 
-function _manage_choice(obj::HDF5_Obj, input::Vector{String}, type::String, mode::String)
+function _manage_choice(obj::Result, input::Vector{String}, type::String, mode::String)
     if type == "times"
         _manage_choice(obj, [parse(Float64, i) for i in input], type, mode)
     else
@@ -206,11 +206,11 @@ function _manage_choice(obj::HDF5_Obj, input::Vector{String}, type::String, mode
     end
 end
 #only type "increments" possible
-function _manage_choice(obj::HDF5_Obj, input::Integer, type::String, action::String)
+function _manage_choice(obj::Result, input::Integer, type::String, action::String)
     _manage_choice(obj, [input], type, action)
 end
 #only type "increments" possible
-function _manage_choice(obj::HDF5_Obj, input::Vector{Int64}, type::String, mode::String)
+function _manage_choice(obj::Result, input::Vector{Int64}, type::String, mode::String)
     choice = String[]
     for i in input
         if i >= 0
@@ -222,11 +222,11 @@ function _manage_choice(obj::HDF5_Obj, input::Vector{Int64}, type::String, mode:
     _set_viewchoice(obj, choice, type, mode)
 end
 #only type "times" possible
-function _manage_choice(obj::HDF5_Obj, input::Float64, type::String, action::String)
+function _manage_choice(obj::Result, input::Float64, type::String, action::String)
     _manage_choice(obj, [input], type, action)
 end
 #only type "times" possible
-function _manage_choice(obj::HDF5_Obj, input::Vector{<:AbstractFloat}, type::String, action::String)
+function _manage_choice(obj::Result, input::Vector{<:AbstractFloat}, type::String, action::String)
     choice = String[]
     for (i, time) in enumerate(getproperty(obj, Symbol(type)))
         for j in input
@@ -239,12 +239,12 @@ function _manage_choice(obj::HDF5_Obj, input::Vector{<:AbstractFloat}, type::Str
 end
 
 """
-    _set_viewchoice(obj::HDF5_Obj, choice::Vector{String}, type::String, action::String)
+    _set_viewchoice(obj::Result, choice::Vector{String}, type::String, action::String)
 
 Set view `choice`s of `type` to `obj.visible[type]`. 
 `action` must be in ["set", "del", "add"] and specifies if `choice` should be set, added to or deleted from the current view of `obj`. 
 """
-function _set_viewchoice(obj::HDF5_Obj, choice::Vector{String}, type::String, action::String)
+function _set_viewchoice(obj::Result, choice::Vector{String}, type::String, action::String)
     existing = Set(obj.visible[type])
     valid = intersect(Set(choice), Set(getproperty(obj, Symbol(type))))
     if action == "set"
@@ -259,13 +259,13 @@ function _set_viewchoice(obj::HDF5_Obj, choice::Vector{String}, type::String, ac
 end
 
 """
-    get(obj::HDF5_Obj, output::Union{String,Vector{String}}="*"; flatten::Bool=true, prune::Bool=true)
+    get(obj::Result, output::Union{String,Vector{String}}="*"; flatten::Bool=true, prune::Bool=true)
 
 Collect data reflecting the group/folder structure in the DADF5 file.
 Only datasets in the current view and optionally specified by `output` are collected.
 
 # Arguments
-- obj: HDF5_Obj to get data from
+- obj: Result to get data from
 - output : Names of the datasets to read.
             Defaults to '*', in which case all datasets are read.
 - flatten : Remove singular levels of the folder hierarchy.
@@ -274,7 +274,7 @@ Only datasets in the current view and optionally specified by `output` are colle
 - prune : Remove branches with no data. Defaults to True.
 """
 function get(
-    obj::HDF5_Obj,
+    obj::Result,
     output::Union{String,Vector{String}}="*";
     flatten::Bool=true,
     prune::Bool=true
@@ -331,7 +331,7 @@ end
 
 
 """
-    place(obj::HDF5_Obj, output::Union{String,Vector{String}}="*"; constituents::Union{Vector{Int64},Nothing}=nothing, flatten::Bool=true, prune::Bool=true, fill_float::Float64=NaN, fill_int::Int64=0)
+    place(obj::Result, output::Union{String,Vector{String}}="*"; constituents::Union{Vector{Int64},Nothing}=nothing, flatten::Bool=true, prune::Bool=true, fill_float::Float64=NaN, fill_int::Int64=0)
 
 Merge data into spatial order that is compatible with the VTK representation.
 
@@ -341,7 +341,7 @@ Multi-phase data is fused into a single output.
 and one constituent is present.
 
 # Arguments
-- obj : HDF5_Obj to be worked on
+- obj : Result to be worked on
 - output : 
     Names of the datasets to read.
     Defaults to '*', in which case all datasets of the current view are exported.
@@ -356,7 +356,7 @@ and one constituent is present.
     Defaults to 0.
 """
 function place(
-    obj::HDF5_Obj,
+    obj::Result,
     output::Union{String,Vector{String}}="*";
     constituents::Union{Vector{Int64},Int64,Nothing}=nothing,
     flatten::Bool=true,
@@ -432,13 +432,13 @@ function place(
 end
 
 """
-    export_VTK(obj::HDF5_Obj, output::Union{String,Vector{String}}="*"; mode::String="cell", constituents::Union{Vector{Int64},Nothing}=nothing, fill_float::Float64=NaN, fill_int::Int64=0)
+    export_VTK(obj::Result, output::Union{String,Vector{String}}="*"; mode::String="cell", constituents::Union{Vector{Int64},Nothing}=nothing, fill_float::Float64=NaN, fill_int::Int64=0)
 
 Export to VTK cell data. Only datasets in the current view and optionally specified by `output` are exported.
 Create one VTK file (.vti) per visible increment.
 
 # Arguments
-- obj : HDF5_Obj to be exported 
+- obj : Result to be exported 
 - output : 
     Names of the datasets to export to the VTK file.
     Defaults to '*', in which case all datasets of the current view are exported.
@@ -455,7 +455,7 @@ Create one VTK file (.vti) per visible increment.
     Fill value for non-existent entries of integer type.
     Defaults to 0.
 """
-function export_VTK(obj::HDF5_Obj,
+function export_VTK(obj::Result,
     output::Union{String,Vector{String}}="*";
     mode::String="cell", #only cell-mode now
     constituents::Union{Vector{Int64},Nothing}=nothing,
@@ -543,22 +543,22 @@ function export_VTK(obj::HDF5_Obj,
 end
 
 """
-    _empty_like(obj::HDF5_Obj, dataset, fill_val)
+    _empty_like(obj::Result, dataset, fill_val)
 
 Creates `Array` filled with `fill_val` of the dimensions of `dataset` in the first dimensions 
 and the amount of `obj.N_materialpoints` in the last dimension. Attach Metadata of the dataset.
 """
-function _empty_like(obj::HDF5_Obj, dataset, fill_val)
+function _empty_like(obj::Result, dataset, fill_val)
     shape = (size(dataset)[1:end-1]..., obj.N_materialpoints)
     return attach_metadata(fill(fill_val, shape), metadata(dataset))
 end
 
 """
-    _mappings(obj::HDF5_Obj)
+    _mappings(obj::Result)
 
 Extracts mapping data for phases and homogenizations to place data spatially
 """
-function _mappings(obj::HDF5_Obj)
+function _mappings(obj::Result)
     file = HDF5.h5open(obj.filename, "r")
 
     at_cell_ph = [Dict{String,Vector{Int64}}() for _ in 1:obj.N_constituents]
@@ -629,7 +629,7 @@ _dict_flatten(d::Any) = d
 
 Starting point for post-processing. 
 Read a DADF5 (DAMASK HDF5) file containing DAMASK results and
-get a HDF5_Obj returned needed for further post-processing.
+get a Result returned needed for further post-processing.
 
 # Examples
 ```jldoctest
@@ -696,7 +696,7 @@ function read_HDF5(filename::String)
 
     _protected = true
 
-    return HDF5_Obj(filename, version_major, version_minor, structured, cells, _size, origin, increments, times, N_constituents, N_materialpoints, homogenizations, phases, fields, visible, _protected)
+    return Result(filename, version_major, version_minor, structured, cells, _size, origin, increments, times, N_constituents, N_materialpoints, homogenizations, phases, fields, visible, _protected)
 end
 
 end   #end of module

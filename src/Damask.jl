@@ -651,7 +651,7 @@ function read_HDF5(filename::String)
     # right version
     version_minor = Int8(HDF5.read_attribute(file, "DADF5_version_minor"))
     version_major = Int8(HDF5.read_attribute(file, "DADF5_version_major"))
-    if version_major != 0 || version_minor < 12 || version_minor > 14
+    if version_major != 1 || version_minor != 0
         error("unsupported DADF5 version ", version_major, ".", version_minor)
     end
 

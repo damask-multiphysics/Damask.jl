@@ -1,3 +1,3 @@
 using Documenter, Damask
 
-makedocs(sitename="Damask.jl")
+makedocs(sitename="Damask.jl",remotes=nothing)

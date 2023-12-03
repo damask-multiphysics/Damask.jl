@@ -2,7 +2,7 @@ module Damask
 
 import Base: view, get
 using HDF5, Metadata, NaturalSort, WriteVTK
-export read_HDF5, get, view, view_more, view_less, place, export_VTK
+export Result, get, view, view_more, view_less, place, export_VTK
 
 
 const prefix_inc = "increment_"
@@ -11,7 +11,6 @@ const prefix_inc = "increment_"
     Result
 
 Contains informations and a view of a DADF5 (DAMASK HDF5) file.
-Is returned by [`read_HDF5`](@ref)
 """
 struct Result
     filename::String
@@ -58,7 +57,7 @@ False or String[] as keyword value deselects all.
 Create a view on the last increment
 ```jldoctest
 julia> using Damask
-julia> res = read_HDF5("my_file.hdf5")
+julia> res = Damask.Result("my_file.hdf5")
 julia> v = view(res,increments = -1)
 ```
 """
@@ -100,7 +99,7 @@ False or String[] as keyword value deselects all.
 Increasing a view from first increment to increment 0,2,4 :
 ```jldoctest
 julia> using Damask
-julia> r = view(read_HDF5("my_file.hdf5"), increments=0)
+julia> r = view(Damask.Result("my_file.hdf5"), increments=0)
 julia> r2 = view_more(r, increments=[2,4])
 ```
 """
@@ -132,7 +131,7 @@ False or String[] for keyword value does nothing.
 Increasing a view from first increment to increment 0,2,4 :
 ```jldoctest
 julia> using Damask
-julia> r = view(read_HDF5("my_file.hdf5"), increments=0)
+julia> r = view(Damask.Result("my_file.hdf5"), increments=0)
 julia> r2 = view_more(r, increments=[2,4])
 ```
 """
@@ -625,7 +624,7 @@ end
 _dict_flatten(d::Any) = d
 
 """
-    read_HDF5(filename::String)
+    Damask.Result(filename::String)
 
 Starting point for post-processing. 
 Read a DADF5 (DAMASK HDF5) file containing DAMASK results and
@@ -634,14 +633,14 @@ get a Result returned needed for further post-processing.
 # Examples
 ```jldoctest
 julia> using Damask
-julia> res = read_HDF5("my_file.hdf5")
+julia> res = Damask.Result("my_file.hdf5")
 ```
 If the path/filename contains backslashes use "raw" in front of it or use double backslashes 
 ```jldoctest
-julia> res = read_HDF5(raw"my_file.hdf5")
+julia> res = damask.Result(raw"my_file.hdf5")
 ```
 """
-function read_HDF5(filename::String)
+function Result(filename::String)::Result
     #no hdf5 file?
     if !HDF5.ishdf5(filename)
         throw(Base.IOError("No HDF5-File", 0))

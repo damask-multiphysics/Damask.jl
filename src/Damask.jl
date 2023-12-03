@@ -1,6 +1,5 @@
 module Damask
 
-import Base: view, get
 using HDF5, Metadata, NaturalSort, WriteVTK
 export Result, get, view, view_more, view_less, place, export_VTK
 

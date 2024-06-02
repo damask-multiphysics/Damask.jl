@@ -1,9 +1,8 @@
 using Damask
+using Damask: view, get
 using Test
 using JLD2
 using SHA
-
-
 
 const ref_path = abspath(joinpath(dirname(pathof(Damask)), "..", "test", "resources"))
 
@@ -11,10 +10,10 @@ const filepath1 = joinpath(ref_path, "12grains6x7x8_tensionY.hdf5")
 const filepath2 = joinpath(ref_path, "4grains2x4x3_compressionY.hdf5")
 
 
-@testset "read_HDF5" begin
-    @test_throws Base.IOError read_HDF5("nothing.txt")
-    t1 = read_HDF5(filepath1)
-    t2 = read_HDF5(filepath2)
+@testset "Result" begin
+    @test_throws Base.IOError Result("nothing.txt")
+    t1 = Result(filepath1)
+    t2 = Result(filepath2)
 
     properties = [:N_materialpoints, :N_constituents, :cells, :size, :origin, :increments, :times, :phases, :homogenizations, :fields]
     vals1 = [336, 1, [6, 7, 8], [0.75, 0.875, 1.0], [0.0, 0.0, 0.0],
@@ -42,8 +41,8 @@ end
 end
 
 @testset "view, view_more, view_less" begin
-    all_visible_obj = read_HDF5(filepath1)
-    t = read_HDF5(filepath1)
+    all_visible_obj = Result(filepath1)
+    t = Result(filepath1)
     for test_obj in [view(t, times=20.0, fields=false, homogenizations=true), view(t, times=false, phases=true, fields=String[])]
 
         @testset "view_all" begin
@@ -97,7 +96,7 @@ end
 end
 
 @testset "get" begin
-    obj = read_HDF5(filepath2)
+    obj = Result(filepath2)
     params_view = [Dict(),
         Dict(:increments => 3),
         Dict(:increments => [1, 8, 3, 4, 5, 6, 7]),
@@ -120,14 +119,14 @@ end
         get_obj = get(t_obj, params_get[i][1], flatten=params_get[i][2], prune=params_get[i][3])
         path = joinpath(ref_path, "get", "test_get[$i].jld2")
 
-        #save(path, get_obj, compress=true)
+        #save(path, get_obj, compress=true) # new reference results
         ref = load(path)
         @test isequal(ref, get_obj)
     end
 end
 
 @testset "place" begin
-    obj = read_HDF5(filepath2)
+    obj = Result(filepath2)
     params_view = [Dict(),
         Dict(:increments => 3),
         Dict(:increments => [1, 8, 3, 4, 5, 6, 7]),
@@ -149,17 +148,18 @@ end
         t_obj = view(obj; params_view[i]...)
         place_obj = place(t_obj, params_place[i][1], flatten=params_place[i][2], prune=params_place[i][3],constituents=params_place[i][4])
         path = joinpath(ref_path, "place", "test_place[$i].jld2")
-        #save(path, place_obj, compress=true)
+        
+        #save(path, place_obj, compress=true) # new reference results
         ref = load(path)
         @test isequal(ref, place_obj)
     end
 end
 
 function create_VTK_reference()
-    r = view(Damask.read_HDF5(filepath1), increments=40)
+    r = view(Damask.Result(filepath1), increments=40)
     Damask.export_VTK(r)
-    val = bytes2hex(sha2_256(read(joinpath(dirname(pathof(Damask)), "..", "12grains6x7x8_tensionY_increm40.vti"))))
-    write(joinpath(ref_path, "export_VTK", "12grains6x7x8_tensionY_increm40.vti.sha256"), val)
+    val = bytes2hex(sha2_256(read(joinpath(dirname(pathof(Damask)), "..", "12grains6x7x8_tensionY_inc40.vti"))))
+    write(joinpath(ref_path, "export_VTK", "12grains6x7x8_tensionY_inc40.vti.sha256"), val)
 end
 
 #create_VTK_reference()
@@ -167,9 +167,9 @@ end
 @testset "export_VTK" begin
     tmp_path = mktempdir()
     cp(joinpath(ref_path, "12grains6x7x8_tensionY.hdf5"), joinpath(tmp_path, "12grains6x7x8_tensionY.hdf5"))
-    r = Damask.read_HDF5(joinpath(tmp_path, "12grains6x7x8_tensionY.hdf5"))
+    r = Damask.Result(joinpath(tmp_path, "12grains6x7x8_tensionY.hdf5"))
     Damask.export_VTK(r)
-    current = bytes2hex(sha2_256(read(joinpath(tmp_path, "12grains6x7x8_tensionY_increm40.vti"), String)))
-    reference = read(joinpath(ref_path, "export_VTK", "12grains6x7x8_tensionY_increm40.vti.sha256"), String)
+    current = bytes2hex(sha2_256(read(joinpath(tmp_path, "12grains6x7x8_tensionY_inc40.vti"), String)))
+    reference = read(joinpath(ref_path, "export_VTK", "12grains6x7x8_tensionY_inc40.vti.sha256"), String)
     @test reference == current
 end

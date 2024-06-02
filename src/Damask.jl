@@ -32,7 +32,13 @@ end
 
 """Presentation of `Result` showing `obj.filename` and `obj.visible`"""
 Base.show(io::IO, obj::Result) = begin
-    str = "Damask-HDF5-Object:\nFilename:\t$(obj.filename)\nVisible:\tincrements:\t $(obj.visible["increments"])\n\t\tphases:\t\t $(obj.visible["phases"])\n\t\thomogenizations: $(obj.visible["homogenizations"])\n\t\tfields:\t\t $(obj.visible["fields"])\n"
+    str = """DADF5 view on $(obj.filename)
+          Visible
+              increments: $(obj.visible["increments"])
+              phases: $(obj.visible["phases"])
+              homogenizations: $(obj.visible["homogenizations"])
+              fields: $(obj.visible["fields"])
+          """
     print(io, str)
 end
 
@@ -649,7 +655,7 @@ function Result(filename::String)::Result
     # right version
     version_minor = Int8(HDF5.read_attribute(file, "DADF5_version_minor"))
     version_major = Int8(HDF5.read_attribute(file, "DADF5_version_major"))
-    if version_major != 1 || version_minor != 0
+    if version_major != 1
         error("unsupported DADF5 version ", version_major, ".", version_minor)
     end
 

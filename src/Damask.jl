@@ -497,7 +497,7 @@ function export_VTK(obj::Result,
 
     for inc in obj.visible["increments"]
         k_inc = parse(Int64, split(inc, prefix_inc)[end])
-        vtkfile = vtk_grid(split(obj.filename, ".")[1] * "_inc" * string(k_inc, pad=n_digits), x, y, z) #TODO different for mode "point" ?
+        vtkfile = vtk_grid(split(obj.filename, ".")[1] * "_inc" * string(k_inc, pad=n_digits), x, y, z,append = false) #TODO different for mode "point" ?
 
         vtkfile["created", VTKFieldData()] = read_attribute(file, "creator") * " (" * read_attribute(file, "created") * ")"
         if mode == "cell"
